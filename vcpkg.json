@@ -1,0 +1,11 @@
+{
+  "name": "kalman-filter-2",
+  "version": "1.0.0",
+  "dependencies": [
+    "boost-filesystem",
+    "boost-system",
+    "boost",
+    "eigen3",
+    "asio"
+  ]
+}

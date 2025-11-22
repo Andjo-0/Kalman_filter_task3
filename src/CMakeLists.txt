@@ -1,16 +1,17 @@
-add_library(kalman kalman.cpp)
+add_library(kalman kalman.cpp MPC.cpp)
 target_include_directories(kalman PUBLIC "${CMAKE_SOURCE_DIR}/include")
 
-include(FetchContent)
 
-FetchContent_Declare(
-        Eigen3
-        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-        GIT_TAG master   # or "master" but a version tag is better
+find_package(Eigen3 REQUIRED)
+find_package(Boost REQUIRED COMPONENTS filesystem system)
+find_package(asio REQUIRED)   # for standalone Asio
+
+
+target_link_libraries(kalman
+        Eigen3::Eigen
+        Boost::boost
+        Boost::system
+        Boost::filesystem
+        asio::asio
 
 )
-
-FetchContent_MakeAvailable(Eigen3)
-
-
-target_link_libraries(kalman Eigen3::Eigen)
