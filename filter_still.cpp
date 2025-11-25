@@ -61,7 +61,7 @@ Eigen::Matrix3d compute_Rws(double q1, double q2) {
 */
 Eigen::Vector3d compute_zg(double q1, double q2) {
     Eigen::Matrix3d Rws = compute_Rws(q1, q2);
-    return Rws.transpose() * gw;
+    return  gw;//Rws.transpose() *
 }
 
 
@@ -115,54 +115,6 @@ std::vector<wrench_data> read_wrench_file(const std::string& filename) {
 
     return data;
 }
-
-std::vector<joint_data> read_joint_file(const std::string& filename) {
-    std::vector<joint_data> data;
-
-    std::ifstream file;
-    if (!open_csv(filename, file)) {
-        std::cerr << "Error opening joint file: " << filename << "\n";
-        return data;
-    }
-
-    std::string line;
-    bool first_line = true;
-
-    while (std::getline(file, line)) {
-        if (first_line) {
-            first_line = false;
-            continue;   // skip header
-        }
-
-        std::stringstream ss(line);
-        joint_data row;
-        std::string cell;
-
-        // Column order:
-        // Unix Epoch Time, PWM %, PWM, Angle, Velocity
-
-        // Time (as double → long long)
-        std::getline(ss, cell, ',');
-        row.time = static_cast<long long>(std::stod(cell));
-
-        // Skip PWM %
-        std::getline(ss, cell, ',');
-
-        // Skip PWM
-        std::getline(ss, cell, ',');
-
-        // Angle
-        std::getline(ss, cell, ',');
-        row.angle = std::stod(cell);
-
-        // Done (Velocity is ignored)
-
-        data.push_back(row);
-    }
-
-    return data;
-}
-
 
 Eigen::MatrixXd load_R_matrix(const std::string& filename) {
     std::ifstream file(filename);
@@ -237,11 +189,9 @@ int main() {
     std::string wrench_file = "Data_collection/variances/output_wrench_log_test_standing_still.csv";
     std::string R_file = "Data_collection/R/R_matrix.csv";
 
-    std::string angle_file = "Joint_data/tf_test_24_11_nr_1.csv";
+
 
     auto wrench_data_vec = read_wrench_file(wrench_file);
-
-    auto joint_data_vec = read_joint_file(angle_file);
 
     if (wrench_data_vec.empty()) {
         std::cerr << "No wrench data loaded." << std::endl;
@@ -259,30 +209,6 @@ int main() {
         double t_sec = static_cast<double>(w.time) / 1e6;
         wrench_times_sec.push_back(t_sec);
     }
-
-// Convert joint time (already seconds but stored as long long)
-    std::vector<double> joint_times_sec;
-    joint_times_sec.reserve(joint_data_vec.size());
-    for (auto& j : joint_data_vec) {
-        joint_times_sec.push_back(static_cast<double>(j.time));
-    }
-
-// Find global earliest time
-    double t_min = std::numeric_limits<double>::max();
-
-    for (double t : wrench_times_sec) t_min = std::min(t_min, t);
-    for (double t : joint_times_sec)   t_min = std::min(t_min, t);
-
-// Normalize both datasets
-    for (size_t i = 0; i < wrench_data_vec.size(); i++) {
-        wrench_data_vec[i].time_norm = wrench_times_sec[i] - t_min;
-    }
-
-    for (size_t i = 0; i < joint_data_vec.size(); i++) {
-        joint_data_vec[i].time_norm = joint_times_sec[i] - t_min;
-    }
-
-    std::cout << "Time normalized. Global start time = " << t_min << " sec\n";
 
 
     Eigen::MatrixXd R6 = load_R_matrix(R_file);
@@ -347,20 +273,7 @@ int main() {
 
     std::vector<kf_entry> results;
 
-    double prev_time = wrench_data_vec[0].time_norm;
-
-    // after normalization
-    std::cout << "First wrench time_norm: " << wrench_data_vec.front().time_norm
-              << "  first joint time_norm: " << joint_data_vec.front().time_norm << "\n";
-
-    int some_counter = 0;
-
-    for (double test_deg : {0.0, 30.0, 60.0, 90.0}) {
-        double q = test_deg * M_PI / 180.0;
-        Eigen::Vector3d zg_test = compute_zg(q, 0.0);
-        std::cout << "q=" << test_deg << " deg -> zg = " << zg_test.transpose() << "\n";
-    }
-
+    double prev_time = wrench_data_vec[0].time;
 
 
     for (const auto& w : wrench_data_vec) {
@@ -368,19 +281,16 @@ int main() {
         prev_time = w.time_norm;
 
 
-        some_counter++;
-
-
         KF.predict(Eigen::VectorXd::Zero(9));
 
         // Compute gravity vector in sensor frame
-    // Find nearest joint angle for the current wrench timestamp
-        double q1_deg = find_closest_angle(w.time_norm, joint_data_vec);
+        // Find nearest joint angle for the current wrench timestamp
 
-    // Convert degrees → radians
-        double q1 = q1_deg * M_PI / 180.0;
 
-    // Elbow is unknown → keep as zero
+        // Convert degrees → radians
+        double q1 = 0.0;
+
+        // Elbow is unknown → keep as zero
         double q2 = 0.0;
 
         Eigen::Vector3d zg = compute_zg(q1, q2);
@@ -396,10 +306,6 @@ int main() {
         Eigen::Vector3d estimated_gravity = KF.getXHat().segment<3>(0);
         Eigen::Vector3d measured_force = Eigen::Vector3d(w.fx, w.fy, w.fz);
         Eigen::Vector3d compensated_force = measured_force - estimated_gravity;
-
-        std::cout << "q1=" << q1_deg
-                  << " Compensated Fx,Fy,Fz=" << compensated_force.transpose() << std::endl;
-
 
         results.push_back({w.time, KF.getXHat()});
     }

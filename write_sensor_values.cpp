@@ -227,7 +227,7 @@ int main(int argc, char* argv[]) {
 
         std::cout << "Got the serial port." << std::endl;
         // Open CSV output file
-        std::ofstream ofs("Data_collection/variances/output_wrench_log_test.csv");
+        std::ofstream ofs("Data_collection/variances/output_wrench_log_test_standing_still.csv");
         if (!ofs.is_open()) {
             std::cerr << "Failed to open output CSV file." << std::endl;
             return 1;
@@ -235,7 +235,7 @@ int main(int argc, char* argv[]) {
 
         // Write header
         ofs << "time,Fx,Fy,Fz,Mx,My,Mz";
-        //for (int i = 0; i < n_sensors; ++i) ofs << ",s" << i;
+        for (int i = 0; i < n_sensors; ++i) ofs << ",s" << i;
         ofs << "\n";
 
         while (true) {
@@ -289,6 +289,7 @@ int main(int argc, char* argv[]) {
             if (!parse_ok) continue;
 
             svals[5]=svals[4];
+            svals[7]=svals[6];
 
             // Overload check
             bool overloaded = false;
@@ -318,15 +319,16 @@ int main(int argc, char* argv[]) {
             // Write one row to CSV
 
             auto now = std::chrono::system_clock::now();
-            double unix_ts =
-                    std::chrono::duration<double>(now.time_since_epoch()).count();
+            auto us  = std::chrono::time_point_cast<std::chrono::microseconds>(now);
+            long long unix_us = us.time_since_epoch().count();  // integer microseconds
 
-            ofs << unix_ts << ","
+
+            ofs << unix_us << ","
                 << W(0) << "," << W(1) << "," << W(2) << ","
-                << W(3) << "," << W(4) << "," << W(5);
+                << W(3) << "," << W(4) << "," << W(5) ;
 
-            /*for (int i = 0; i < n_sensors; ++i)
-                ofs << "," << svals[i];*/
+            for (int i = 0; i < n_sensors; ++i)
+                ofs << "," << svals[i];
 
             ofs << "\n";
 

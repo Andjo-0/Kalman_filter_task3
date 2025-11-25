@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import os
 
 # ----- File Locations -----
-RAW_FILE = "Data_collection/variances/output_wrench_log_test2.csv"
-KF_FILE  = "Data_collection/filtered/Filtered_wrench_output_test1.csv"
+RAW_FILE = "Data_collection/variances/output_wrench_log_test_standing_still.csv"
+KF_FILE  = "Data_collection/filtered/Filtered_wrench_output_test_standing_still.csv"
 
 def load_raw_wrench(file):
     """Load raw wrench CSV: seq,Fx,Fy,Fz,Mx,My,Mz,s0..."""
