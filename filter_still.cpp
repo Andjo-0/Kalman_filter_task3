@@ -61,7 +61,7 @@ Eigen::Matrix3d compute_Rws(double q1, double q2) {
 */
 Eigen::Vector3d compute_zg(double q1, double q2) {
     Eigen::Matrix3d Rws = compute_Rws(q1, q2);
-    return  gw;//Rws.transpose() *
+    return Rws.transpose() * gw;
 }
 
 
@@ -146,17 +146,43 @@ Eigen::MatrixXd load_R_matrix(const std::string& filename) {
     return R;
 }
 
-struct kf_entry { long long time; Eigen::VectorXd x_hat; };
+struct kf_entry { long long time; Eigen::VectorXd x_hat; Eigen::Vector3d compensated_force;Eigen::Vector3d compensated_torque;};
 
-void save_kf_csv(const std::string& filename, const std::vector<kf_entry>& data) {
+void save_kf_csv(const std::string& filename, const std::vector<kf_entry>& kf_data) {
     std::ofstream file(filename);
-    file << "time,ax,ay,az,fx,fy,fz,tx,ty,tz\n";
-    for (const auto& entry : data) {
-        file << entry.time;
-        for (int i = 0; i < entry.x_hat.size(); i++) file << "," << entry.x_hat(i);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file: " << filename << "\n";
+        return;
+    }
+
+    // Header: time, 9 state values, 6 compensated outputs
+    file << "time,a_x,a_y,a_z,F_x,F_y,F_z,T_x,T_y,T_z,z_1,z_2,z_3,z_4,z_5,z_6\n";
+
+    for (const auto& entry : kf_data) {
+        file << entry.time; // time first
+
+        // write 9 state values (x_hat is 9x1)
+        const Eigen::VectorXd& x = entry.x_hat;
+        for (int i = 0; i < x.size(); ++i) {
+            file << "," << x(i);
+        }
+
+        // compensated_force is Eigen::Vector3d
+        const Eigen::Vector3d& Zf = entry.compensated_force;
+        for (int i = 0; i < 3; ++i) {
+            file << "," << Zf(i);
+        }
+
+        // compensated_torque is Eigen::Vector3d
+        const Eigen::Vector3d& Zt = entry.compensated_torque;
+        for (int i = 0; i < 3; ++i) {
+            file << "," << Zt(i);
+        }
+
         file << "\n";
     }
 }
+
 
 double find_closest_angle(double t, const std::vector<joint_data>& joints)
 {
@@ -181,6 +207,7 @@ double q_scale = 0.000000001;   // process noise scale
 double r_scale_gravity = 8;  // gravity measurement
 double r_scale_ftf = 0.05;      // FTS measurement
 double p_scale = 1.0;
+
 
 
 
@@ -261,12 +288,22 @@ int main() {
     Q.block<3,3>(6,6) *= 0.5; // torques
     Q.block<1,1>(7,7) *= 0.3; // torques
 
+    Eigen::Matrix<double, 6, 9> Zbc;
 
+    // Top row:  [ -mb*I   ,   I    ,   0 ]
+    Zbc.block<3,3>(0,0) = -mass * Eigen::Matrix3d::Identity();
+    Zbc.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+    Zbc.block<3,3>(0,6) = Eigen::Matrix3d::Zero();
+
+    // Bottom row: [ -mb*[rbs]× ,   0   ,   I ]
+    Zbc.block<3,3>(3,0) = -mass * skew(rs);
+    Zbc.block<3,3>(3,3) = Eigen::Matrix3d::Zero();
+    Zbc.block<3,3>(3,6) = Eigen::Matrix3d::Identity();
 
     kalman_filter KF(0,A,B,Q,R,Hf,P);
     Eigen::VectorXd x0 = Eigen::VectorXd::Zero(9);
 
-    x0 << 0,0,9.81,wrench_data_vec[0].fx, wrench_data_vec[0].fy, wrench_data_vec[0].fz,
+    x0 << 0,0,-9.81,wrench_data_vec[0].fx, wrench_data_vec[0].fy, wrench_data_vec[0].fz,
             wrench_data_vec[0].tx, wrench_data_vec[0].ty, wrench_data_vec[0].tz;
 
     KF.init(0, x0);
@@ -303,11 +340,12 @@ int main() {
 
         KF.update(z, Hf, R);
 
-        Eigen::Vector3d estimated_gravity = KF.getXHat().segment<3>(0);
-        Eigen::Vector3d measured_force = Eigen::Vector3d(w.fx, w.fy, w.fz);
-        Eigen::Vector3d compensated_force = measured_force - estimated_gravity;
+        Eigen::Matrix<double,6,1> zbc = Zbc * KF.getXHat();
 
-        results.push_back({w.time, KF.getXHat()});
+        Eigen::Vector3d compensated_force =  zbc.segment<3>(0);
+        Eigen::Vector3d compensated_torque = zbc.segment<3>(3);
+
+        results.push_back({w.time, KF.getXHat(),compensated_force,compensated_torque});
     }
 
     save_kf_csv("Data_collection/filtered/Filtered_wrench_output_test_standing_still.csv", results);

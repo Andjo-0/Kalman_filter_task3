@@ -10,7 +10,7 @@
 #include "kalman.hpp"
 
 const double mass = 0.932;
-const Eigen::RowVector3d rs(0,0,0.044);
+const Eigen::Vector3d rs(0,0,0.044);
 
 const double sigma_k = 0.5;
 const double ff = 698.3;    // FTS frequency
@@ -258,17 +258,24 @@ std::vector<std::vector<wrench_data>> read_wrench_data(
     return all_data;
 }
 
-// Gravity vector in world frame
-const std::array<double, 3> g_w = {0.0, 0.0, -9.81};
 
-// Matrix transpose multiply vector
-std::array<double, 3> R_T_times_g(const orientation_data& R) {
-    std::array<double, 3> g_s;
-    // g_s = R^T * g_w
-    g_s[0] = R.r11 * g_w[0] + R.r21 * g_w[1] + R.r31 * g_w[2];
-    g_s[1] = R.r12 * g_w[0] + R.r22 * g_w[1] + R.r32 * g_w[2];
-    g_s[2] = R.r13 * g_w[0] + R.r23 * g_w[1] + R.r33 * g_w[2];
-    return g_s;
+
+std::array<double, 3> R_T_times_g(const orientation_data& R_data) {
+    // Create Eigen matrix from orientation_data
+    Eigen::Matrix3d R;
+    R << R_data.r11, R_data.r12, R_data.r13,
+            R_data.r21, R_data.r22, R_data.r23,
+            R_data.r31, R_data.r32, R_data.r33;
+
+    // Map g_w to an Eigen vector
+    Eigen::Vector3d g_vec(0.0,0.0, -9.81);
+
+    // Compute R^T * g_w
+    Eigen::Vector3d g_s_vec = R.transpose() * g_vec;
+
+
+    // Convert result back to std::array
+    return { g_s_vec[0], g_s_vec[1], g_s_vec[2] };
 }
 
 // Compute u_k
@@ -280,10 +287,12 @@ Eigen::Vector3d compute_uk(
     auto g_prev = R_T_times_g(R_prev);
     auto g_curr = R_T_times_g(R_curr);
 
-    Eigen::Vector3d delta_g;
-    for (int i = 0; i < 3; ++i) {
-        delta_g[i] = (g_curr[i] - g_prev[i]) * (f_r / (f_f + f_a));
-    }
+
+    Eigen::Vector3d g_prev_s(Eigen::Vector3d(g_prev[0], g_prev[1], g_prev[2]));
+    Eigen::Vector3d g_curr_s(Eigen::Vector3d(g_curr[0], g_curr[1], g_curr[2]));
+
+    Eigen::Vector3d delta_g = (g_curr_s - g_prev_s) * (f_r / (f_f + f_a));
+
     return delta_g;
 }
 
@@ -317,7 +326,7 @@ void save_wrench_csv(const std::string& filename, const std::vector<T>& data) {
     }
 }
 
-struct kf_entry { long long time; Eigen::VectorXd x_hat; };
+struct kf_entry { long long time; Eigen::VectorXd x_hat; Eigen::Vector3d compensated_force;Eigen::Vector3d compensated_torque;};
 
 void save_kf_csv(const std::string& filename, const std::vector<kf_entry>& kf_data) {
     std::ofstream file(filename);
@@ -326,20 +335,34 @@ void save_kf_csv(const std::string& filename, const std::vector<kf_entry>& kf_da
         return;
     }
 
-    // Header
-    file << "time,a_x,a_y,a_z,F_x,F_y,F_z,T_x,T_y,T_z\n";
+    // Header: time, 9 state values, 6 compensated outputs
+    file << "time,a_x,a_y,a_z,F_x,F_y,F_z,T_x,T_y,T_z,z_1,z_2,z_3,z_4,z_5,z_6\n";
 
     for (const auto& entry : kf_data) {
-        file << entry.time << ",";
+        file << entry.time; // time first
 
+        // write 9 state values (x_hat is 9x1)
         const Eigen::VectorXd& x = entry.x_hat;
         for (int i = 0; i < x.size(); ++i) {
-            file << x(i);
-            if (i < x.size() - 1) file << ",";
+            file << "," << x(i);
         }
+
+        // compensated_force is Eigen::Vector3d
+        const Eigen::Vector3d& Zf = entry.compensated_force;
+        for (int i = 0; i < 3; ++i) {
+            file << "," << Zf(i);
+        }
+
+        // compensated_torque is Eigen::Vector3d
+        const Eigen::Vector3d& Zt = entry.compensated_torque;
+        for (int i = 0; i < 3; ++i) {
+            file << "," << Zt(i);
+        }
+
         file << "\n";
     }
 }
+
 
 
 int main() {
@@ -370,6 +393,7 @@ int main() {
     // IMU measurement
     Eigen::MatrixXd Ha = Eigen::MatrixXd::Zero(3,9);
     Ha.block<3,3>(0,0) = Eigen::Matrix3d::Identity();
+
     Eigen::Matrix3d Ra = (sa * saSigmaA).asDiagonal();
 
     Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(9,9);
@@ -404,6 +428,20 @@ int main() {
 
     std::vector<std::vector<kf_entry>> kf_estimates(tags.size());
 
+    Eigen::Matrix<double, 6, 9> Zbc;
+
+// Top row:  [ -mb*I   ,   I    ,   0 ]
+    Zbc.block<3,3>(0,0) = -mass * Eigen::Matrix3d::Identity()*-9.81;
+    Zbc.block<3,3>(0,3) = Eigen::Matrix3d::Identity();
+    Zbc.block<3,3>(0,6) = Eigen::Matrix3d::Zero();
+
+// Bottom row: [ -mb*[rbs]× ,   0   ,   I ]
+    Zbc.block<3,3>(3,0) = -mass * skew(rs)*-9.81;
+    Zbc.block<3,3>(3,3) = Eigen::Matrix3d::Zero();
+    Zbc.block<3,3>(3,6) = Eigen::Matrix3d::Identity();
+
+
+
     for (size_t test = 0; test < tags.size(); ++test) {
         auto& accel_data_vec = accel_sets[test];
         auto& orient_data_vec = orient_sets[test];
@@ -420,26 +458,31 @@ int main() {
         size_t imu_idx = 0, fts_idx = 0, orient_idx = 0;
         long long t_prev = 0;
 
+        // Update process covariance
+
+
         while (imu_idx < accel_data_vec.size() || fts_idx < wrench_data_vec.size() || orient_idx < orient_data_vec.size()) {
 
             // Determine next timestamp
             long long t_next = LLONG_MAX;
+
             if (imu_idx < accel_data_vec.size()) t_next = std::min(t_next, accel_data_vec[imu_idx].time);
             if (fts_idx < wrench_data_vec.size()) t_next = std::min(t_next, wrench_data_vec[fts_idx].time);
             if (orient_idx < orient_data_vec.size()) t_next = std::min(t_next, orient_data_vec[orient_idx].time);
 
-            // Compute dt in seconds
-            double dt_sec = static_cast<double>(t_next - t_prev)/ 1e6; // adjust if timestamps in microseconds
-            t_prev = t_next;
+            double dt = static_cast<double>(t_next - t_prev)/1e2;
 
-            // Update process covariance
-            Q.block<3,3>(0,0) = dt_sec * sigma_k * Eigen::Matrix3d::Identity();
-            Q.block<3,3>(3,3) = dt_sec * mass * Eigen::Matrix3d::Identity();
-            Q.block<3,3>(6,6) = dt_sec * mass * rs.norm() * sigma_k * Eigen::Matrix3d::Identity();
+            Q.block<3,3>(0,0) = dt* sigma_k*Eigen::Matrix3d::Identity();
+            Q.block<3,3>(3,3) =  dt*sigma_k*mass * Eigen::Matrix3d::Identity();
+            Q.block<3,3>(6,6) = dt* sigma_k*rs.norm() * Eigen::Matrix3d::Identity();
             KF.setQ(Q);
+
+
+            t_prev = t_next;
 
             // Compute control input
             Eigen::Vector3d uk = Eigen::Vector3d::Zero();
+
             if (orient_idx > 0 && orient_idx < orient_data_vec.size()) {
                 uk = compute_uk(orient_data_vec[orient_idx-1],
                                 orient_data_vec[orient_idx],
@@ -450,10 +493,22 @@ int main() {
 
             // Update with IMU
             if (imu_idx < accel_data_vec.size() && accel_data_vec[imu_idx].time == t_next) {
+                //Eigen::VectorXd za(3);
+                //za << accel_data_vec[imu_idx].ax, accel_data_vec[imu_idx].ay, accel_data_vec[imu_idx].az;
+
+                Eigen::Vector3d imu_a(accel_data_vec[imu_idx].ax,
+                                      accel_data_vec[imu_idx].ay,
+                                      accel_data_vec[imu_idx].az);
+
+                // Rotate to FTS frame using your fixed rotation matrix
+                Eigen::Vector3d a_s = R_fa * imu_a;
+
                 Eigen::VectorXd za(3);
-                za << accel_data_vec[imu_idx].ax, accel_data_vec[imu_idx].ay, accel_data_vec[imu_idx].az;
+                za << a_s(0), a_s(1), a_s(2);
+                KF.update(za, Ha, Ra);
                 KF.update(za, Ha, Ra);
                 imu_idx++;
+
             }
 
             // Update with FTS
@@ -471,7 +526,13 @@ int main() {
             }
 
             // Store KF estimate with timestamp
-            kf_estimates[test].push_back({t_next, KF.getXHat()});
+            Eigen::Matrix<double,6,1> zbc = Zbc * KF.getXHat();
+
+            Eigen::Vector3d compensated_force =  zbc.segment<3>(0);
+            Eigen::Vector3d compensated_torque = zbc.segment<3>(3);
+
+            kf_estimates[test].push_back({t_next, KF.getXHat(),compensated_force,compensated_torque});
+
         }
     }
 
@@ -483,4 +544,5 @@ int main() {
 
     std::cout << "All data saved to Filtered_data/\n";
     return 0;
+
 }

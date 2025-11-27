@@ -1,4 +1,4 @@
-add_library(kalman kalman.cpp MPC.cpp)
+add_library(kalman kalman.cpp)
 target_include_directories(kalman PUBLIC "${CMAKE_SOURCE_DIR}/include")
 
 
@@ -13,5 +13,4 @@ target_link_libraries(kalman
         Boost::system
         Boost::filesystem
         asio::asio
-
 )

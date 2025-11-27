@@ -45,6 +45,7 @@ def plot_comparison(experiments):
         # --- Fz comparison ---
         axes[i,0].plot(raw_df["time"], raw_df["fz"], label="Raw", color='blue', alpha=0.5)
         axes[i,0].plot(kf_df["time"], kf_df["F_z"], label="KF Filtered", color='red')
+        axes[i,0].plot(kf_df["time"], kf_df["z_3"], label="KF Compensated", color='green')
         axes[i,0].set_title(f"{tag} - Fz [N]")
         axes[i,0].set_xlabel("Time [s]")
         axes[i,0].set_ylabel("Force Z [N]")
@@ -54,6 +55,7 @@ def plot_comparison(experiments):
         # --- Ty comparison ---
         axes[i,1].plot(raw_df["time"], raw_df["ty"], label="Raw", color='blue', alpha=0.5)
         axes[i,1].plot(kf_df["time"], kf_df["T_y"], label="KF Filtered", color='red')
+        axes[i,1].plot(kf_df["time"], kf_df["z_5"], label="KF Compensated", color='green')
         axes[i,1].set_title(f"{tag} - Ty [Nm]")
         axes[i,1].set_xlabel("Time [s]")
         axes[i,1].set_ylabel("Torque Y [Nm]")

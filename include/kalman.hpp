@@ -1,3 +1,5 @@
+//Inspired by https://github.com/hmartiro/kalman-cpp
+
 #ifndef KALMAN_FILTER_KALMAN_HPP
 #define KALMAN_FILTER_KALMAN_HPP
 

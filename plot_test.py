@@ -27,29 +27,36 @@ def load_kf(file):
     return df
 
 def plot_all_axes(raw_df, kf_df):
-    """Plot all forces (Fx,Fy,Fz) and torques (Tx,Ty,Tz) raw vs filtered."""
+    """Plot forces and torques raw vs filtered vs KF state components."""
 
-    force_axes  = [("Fx", "fx"), ("Fy", "fy"), ("Fz", "fz")]
-    torque_axes = [("Mx", "tx"), ("My", "ty"), ("Mz", "tz")]
+    force_axes  = [("Fx", "F_x", "z_1"),
+                   ("Fy", "F_y", "z_2"),
+                   ("Fz", "F_z", "z_3")]
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    torque_axes = [("Mx", "T_x", "z_4"),
+                   ("My", "T_y", "z_5"),
+                   ("Mz", "T_z", "z_6")]
 
-    # ----- Plot Forces -----
-    for i, (raw_key, kf_key) in enumerate(force_axes):
+    fig, axes = plt.subplots(2, 3, figsize=(18, 9))
+
+    # ----- Forces -----
+    for i, (raw_key, kf_key, kf_extra) in enumerate(force_axes):
         ax = axes[0, i]
         ax.plot(raw_df["time"], raw_df[raw_key], label="Raw", alpha=0.5)
         ax.plot(kf_df["time"],  kf_df[kf_key],  label="KF Filtered")
+        ax.plot(kf_df["time"],  kf_df[kf_extra], label=f"KF {kf_extra}", color="green")
         ax.set_title(f"{raw_key} [N]")
         ax.set_xlabel("Time")
         ax.set_ylabel("Force [N]")
         ax.grid(True)
         ax.legend()
 
-    # ----- Plot Torques -----
-    for i, (raw_key, kf_key) in enumerate(torque_axes):
+    # ----- Torques -----
+    for i, (raw_key, kf_key, kf_extra) in enumerate(torque_axes):
         ax = axes[1, i]
         ax.plot(raw_df["time"], raw_df[raw_key], label="Raw", alpha=0.5)
         ax.plot(kf_df["time"],  kf_df[kf_key],  label="KF Filtered")
+        ax.plot(kf_df["time"],  kf_df[kf_extra], label=f"KF {kf_extra}", color="green")
         ax.set_title(f"{raw_key} [Nm]")
         ax.set_xlabel("Time")
         ax.set_ylabel("Torque [Nm]")
@@ -58,6 +65,7 @@ def plot_all_axes(raw_df, kf_df):
 
     plt.tight_layout()
     plt.show()
+
 
 if __name__ == "__main__":
     raw_df = load_raw_wrench(RAW_FILE)
