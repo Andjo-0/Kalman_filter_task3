@@ -1,3 +1,7 @@
+//This file is a C++ version of https://github.com/jonurce/FTS_Calibration/blob/master/5_read_calibrated_values_quadratic.py modified
+//Modified to write the read sensor values by ChatGPT.
+
+
 // read_calibrated_quadratic.cpp
 //
 // Read serial data from COM port (space-separated tokens per line)
